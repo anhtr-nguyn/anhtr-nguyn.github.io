@@ -1,29 +1,28 @@
 import StatusTable from "./reusable/StatusTable.js"
 import { PLUGINS_APIKEY } from "./reusable/apikey.js";
 import loadScript from "./reusable/loadScript.js";
-import "/socket.io/socket.io.js";
+import "./node_modules/socket.io/client-dist/socket.io.js";
 const API_HOST = "https://app.digitalauto.tech"
 
-// ini var
-let initialCenter =  { lat: 10.772016, lng:  106.657738 }
-let nearbyCar = new Map();
-let markers = [];
-
 // socket.io init ----------------------
-const socket = io();
+const socket = io('http://127.0.0.1:3000');
+//-------------------------
+// ini var
+let initialCenter = {lat:0, lng:0};
+let nearbyCar = new Map();
+let haveMarker = false; // cho nay co the sai
+
+
+
 // ggmap -----------------------
 const GoogleMapsLocation = async (apikey, box, initialCenter, {icon = null} = {}) => {
     await loadScript(box.window, `https://maps.googleapis.com/maps/api/js?key=${apikey}`);
-    const ggMap = document.createElement("div");
+	const ggMap = document.createElement("div");
 	ggMap.setAttribute("style", `display:flex; height: 100%; width: 100%;`);
-	
     const map = new box.window.google.maps.Map(ggMap, {
         zoom: 20,
         center: initialCenter,
     });
-
-	box.injectNode(ggMap);
-	
     var imageIcon = {
         url: "https://cdn-icons-png.flaticon.com/512/10480/10480377.png",
         size: new box.window.google.maps.Size(71, 71),
@@ -31,61 +30,41 @@ const GoogleMapsLocation = async (apikey, box, initialCenter, {icon = null} = {}
         anchor: new box.window.google.maps.Point(17, 34),
         scaledSize: new box.window.google.maps.Size(30, 30)
 	};
-	markers[0] = initialCenter; // cho nay can lay tu sever
-    new box.window.google.maps.Marker({
-        position: initialCenter,
-        map: map,
-        label: nameCar,
-        draggable: false,
-        icon: imageIcon
-	});
-	bc.addEventListener("message", (e) => {
-		let info = e.data;
-		let duplicate = false;
-		let i = 0;
-
-		for (i = 0; i < markers.length; i++) {
-			if (markers[i].lat == info.get("lat") && markers[i].lng == info.get("lng")) {
-				duplicate = true;
+	socket.on("marker", (location) => {
+		initialCenter = location;
+		new box.window.google.maps.Marker({
+			position: {lat: location.lat, lng: location.lng},
+			map: map,
+			label: location.name,
+			draggable: false,
+			icon: imageIcon
+		});
+		haveMarker = true;
+		map.setCenter(location);
+	})
+	socket.on("addMarker", markers => {
+		for (let j = 0; j < markers.length; j++) {
+			if (markers[j] != null) {
+				new box.window.google.maps.Marker({
+					position: {lat: markers[j].lat, lng: markers[j].lng},
+					map: map,
+					label: markers[j].name,
+					draggable: false,
+					icon: imageIcon
+				});
 			}
-		}
-		if (duplicate == false) {
-			new box.window.google.maps.Marker({
-				position: {lat: info.get("lat"), lng: info.get("lng")},
-				map: map,
-				label: info.get("nameCar"),
-				draggable: false,
-				icon: imageIcon
-			});
-			markers[i] = { lat: info.get("lat"), lng: info.get("lng") }
-			console.log("added marker")
-		}
-	});
-	// new box.window.google.maps.Marker({
-    //     position: {lat : 10.772099730111755, lng: 106.65794507853887},
-    //     map: map,
-    //     label: nameCar,
-    //     draggable: false,
-    //     icon: imageIcon
-    // });
-    // box.window.google.maps.event.addListener(marker, 'dragend', function(ev){
-	// 	marker.setPosition(marker.getPosition());
-    //     console.log(marker.getPosition().lat());
-    //     console.log(marker.getPosition().lng());
-	// 	initialCenter = marker.getPosition();
-	// });
+		}	
+	})
+	box.injectNode(ggMap);
 }
 // plugin ----------------------
 const plugin = ({ widgets, simulator, vehicle }) => {
-	
-	const container = document.createElement("div")
-	container.style = "width:100%;height:100%"
-	container.innerHTML = `
-		<button id = "bcc">Start broadcast!</button>
-		<p id="mess">Waiting message...</p>
-	`
-	const btn = container.querySelector('#bcc');
 
+	let intitialSpeed = 30; 
+	let initialLeft = true;
+	let initialRight = false;
+	let initialLat = initialCenter.lat;
+	let initialLng = initialCenter.lng;
 	const otherCarInfo = document.createElement("div")
 	otherCarInfo.innerHTML = `
 	<style>
@@ -113,81 +92,78 @@ const plugin = ({ widgets, simulator, vehicle }) => {
 		</tr>
 	</table>
 	`
-    const bc = document.createElement("div")
-    bc.innerHTML = `
-    <span id = "message">Connecting...</span>
-    `
-    socket.on('connect', () => {
-        message = bc.querySelector("#message")
-        message.innerHTML = `connected to ${socket.id}`;
-    })
+	const bc = document.createElement("div")
+	bc.style = `margin:10px,display: flex;
+	justify-content: center;
+	align-items: center;`
+	bc.innerHTML = `
+	<span id = "message">If you are not connectting to sever. Please refresh the page</span>
+	`
+	const control = document.createElement("div")
+	control.innerHTML = `
+	<title>Light Control</title>
+	<h1>Light Control</h1>
+    <button type="button">Left Light</button>
+    <button type="button">Right Light</button>
+	`
+	let leftBtn = control.querySelector("#left-light")
+	let rightBtn = control.querySelector("#right-light")
+	if(leftBtn) {
+        leftBtn.addEventListener("click", () => {
+            console.log('leftBtn click')
+			initialLeft = true;
+			initialRight = false;
+        })
+    }
+    if(rightBtn) {
+        rightBtn.addEventListener("click", () => {
+			console.log('rightBtn click')
+			initialRight = true;
+			initialLeft = false;
+        })
+	}
+	simulator("Vehicle.Speed", "get", () => {
+		return intitialSpeed;
+	});
+	simulator("Vehicle.Body.Lights.IsLeftIndicatorOn", "set", (value) => {
+		initialLeft = value;
+	});
+	simulator("Vehicle.Body.Lights.IsRightIndicatorOn", "set", (value) => {
+		initialRight = value;
+	});
+	simulator("Vehicle.Body.Lights.IsLeftIndicatorOn", "get", () => {
+		return initialLeft;
+	});
+	simulator("Vehicle.Body.Lights.IsRightIndicatorOn", "get", () => {
+		return initialRight;
+	});
 
+	let sim_function;
+	simulator("Vehicle.Speed", "subscribe", async ({func, args}) => {
+		sim_function = args[0]
+	})
+
+    // widget register ----------------------------
+	socket.on('connect', () => {
+		let mess = bc.querySelector("#message");
+		mess.innerHTML = `You have connected to sever, you ID: ${socket.id}`;
+		socket.emit("requestMarker", "give me marker");
+		
+	})
+	widgets.register("Light", (box) => {
+		box.injectNode(control)
+	})
     widgets.register("Boardcast", (box) => {
         box.injectNode(bc)
     })
-
-    let speed = 50; // fetch from playground
-    let light = "R"; // fetch from playground
-    const info = new Map([
-        ["nameCar", "Car2"],
-        ["speed", speed],
-        ["light", light],
-        ["lat", initialCenter.lat],
-        ["lng",initialCenter.lng]
-    ]);
-
-	// Receive message
-	bc.addEventListener('message', (event) => {
-		let info = event.data;
-		let table = otherCarInfo.querySelector('#carTable');
-		let distance = calculateDistance(initialCenter.lat, initialCenter.lng,
-										info.get("lat"),info.get("lng")).toFixed(3);
-		if (nearbyCar.has(info.get("nameCar")) == false) {
-			let row = table.insertRow();
-			let cell1 = row.insertCell(0);
-			let cell2 = row.insertCell(1);
-			let cell3 = row.insertCell(2);
-			let cell4 = row.insertCell(3);
-			cell1.innerHTML = info.get("nameCar");
-			cell2.innerHTML = info.get("speed");
-			cell3.innerHTML = info.get("light");
-			cell4.innerHTML = distance;
-			nearbyCar.set(info.get("nameCar"), 1);
-		}
-		else {
-			//  check distance to delete
-			if (distance > 30) {
-				// delete in map
-				nearbyCar.delete(info.get("nameCar"))
-				// delete row in table
-				let rows = table.getElementsByTagName("tr");
-				for (var i = 1; i < rows.length; i++) {
-					var row = rows[i];
-					var firstCell = row.getElementsByTagName("td")[0];
-					
-					if (firstCell.textContent === info.get("nameCar")) {
-						table.deleteRow(i);
-						break;
-					}
-				}
-			}
-			console.log("The same car!")
-		}
-	})
-
 	widgets.register("listCar", (box) => {
 		box.injectNode(otherCarInfo)
 	})
-
-	widgets.register("bc", (box) => {
-		box.injectNode(container)
-	})
-
 	widgets.register("Table",
         StatusTable({
-            apis:["Vehicle.AverageSpeed","Vehicle.TravelledDistance", "Vehicle.ADAS.CruiseControl.SpeedSet"],
+            apis:["Vehicle.Speed","Vehicle.Body.Lights.IsLeftIndicatorOn", "Vehicle.Body.Lights.IsRightIndicatorOn"],
             vehicle: vehicle,
-		    refresh: 800         
+		    refresh: 1000         
         })
 	)
 	widgets.register(
